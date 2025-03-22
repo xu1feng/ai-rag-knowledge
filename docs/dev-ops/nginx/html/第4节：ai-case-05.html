@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Chat Interface</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Add marked.js for Markdown parsing -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <!-- Add highlight.js for code syntax highlighting -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/github.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/lib/highlight.min.js"></script>
+  <style>
+    /* Additional styles for Markdown content */
+    .markdown-content {
+      line-height: 1.6;
+    }
+    .markdown-content p {
+      margin-bottom: 0.75rem;
+    }
+    .markdown-content h1, .markdown-content h2, .markdown-content h3,
+    .markdown-content h4, .markdown-content h5, .markdown-content h6 {
+      margin-top: 1rem;
+      margin-bottom: 0.5rem;
+      font-weight: 600;
+    }
+    .markdown-content h1 { font-size: 1.5rem; }
+    .markdown-content h2 { font-size: 1.25rem; }
+    .markdown-content h3 { font-size: 1.125rem; }
+    .markdown-content ul, .markdown-content ol {
+      margin-left: 1.5rem;
+      margin-bottom: 0.75rem;
+    }
+    .markdown-content ul { list-style-type: disc; }
+    .markdown-content ol { list-style-type: decimal; }
+    .markdown-content pre {
+      margin-bottom: 0.75rem;
+      padding: 0.75rem;
+      background-color: #f3f4f6;
+      border-radius: 0.375rem;
+      overflow-x: auto;
+    }
+    .markdown-content code {
+      font-family: monospace;
+      background-color: #f3f4f6;
+      padding: 0.125rem 0.25rem;
+      border-radius: 0.25rem;
+    }
+    .markdown-content pre code {
+      padding: 0;
+      background-color: transparent;
+    }
+    .markdown-content blockquote {
+      border-left: 4px solid #e5e7eb;
+      padding-left: 1rem;
+      margin-left: 0;
+      margin-bottom: 0.75rem;
+      color: #6b7280;
+    }
+    .markdown-content a {
+      color: #2563eb;
+      text-decoration: underline;
+    }
+    .markdown-content table {
+      border-collapse: collapse;
+      margin-bottom: 0.75rem;
+      width: 100%;
+    }
+    .markdown-content th, .markdown-content td {
+      border: 1px solid #e5e7eb;
+      padding: 0.5rem;
+    }
+    .markdown-content th {
+      background-color: #f9fafb;
+    }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col">
+<div class="container mx-auto max-w-4xl p-4 flex-grow flex flex-col">
+  <header class="text-center py-4">
+    <h1 class="text-2xl font-bold text-gray-800">AI Chat Assistant</h1>
+  </header>
+
+  <div id="chat-container" class="flex-grow bg-white rounded-lg shadow-md p-4 mb-4 overflow-y-auto h-[60vh]">
+    <div id="messages" class="space-y-4">
+      <div class="flex items-start">
+        <div class="bg-blue-100 rounded-lg p-3 max-w-[80%] text-gray-800">
+          <p class="text-sm font-medium text-blue-600">AI</p>
+          <div class="markdown-content">Hello! How can I help you today?</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-lg shadow-md p-4">
+    <form id="chat-form" class="flex gap-2">
+      <input
+              type="text"
+              id="user-input"
+              class="flex-grow border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Type your message here..."
+              required
+      >
+      <button
+              type="submit"
+              class="bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg px-4 py-2 transition-colors"
+      >
+        Send
+      </button>
+    </form>
+    <div id="model-selector" class="mt-3">
+      <label for="model" class="text-sm text-gray-600">Model:</label>
+      <select id="model" class="ml-2 border border-gray-300 rounded px-2 py-1 text-sm">
+        <option value="deepseek-r1:1.5b">deepseek-r1:1.5b</option>
+        <option value="llama3:8b">llama3:8b</option>
+        <option value="mistral:7b">mistral:7b</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    const chatForm = document.getElementById('chat-form');
+    const userInput = document.getElementById('user-input');
+    const messagesContainer = document.getElementById('messages');
+    const modelSelector = document.getElementById('model');
+
+    // Configure marked options
+    marked.setOptions({
+      breaks: true,
+      gfm: true,
+      highlight: function(code, lang) {
+        if (lang && hljs.getLanguage(lang)) {
+          return hljs.highlight(code, { language: lang }).value;
+        }
+        return hljs.highlightAuto(code).value;
+      }
+    });
+
+    // Base API URL - update this to your actual API endpoint
+    const baseApiUrl = 'http://localhost:8090/api/v1/ollama';
+
+    let currentEventSource = null;
+    let currentMessageElement = null;
+    let currentMessageContent = '';
+
+    // Function to add a message to the chat
+    function addMessage(content, isUser = false) {
+      const messageDiv = document.createElement('div');
+      messageDiv.className = 'flex items-start';
+
+      if (isUser) {
+        messageDiv.className += ' justify-end';
+        messageDiv.innerHTML = `
+                        <div class="bg-blue-600 rounded-lg p-3 max-w-[80%] text-white">
+                            <p class="text-sm font-medium">You</p>
+                            <p>${escapeHtml(content)}</p>
+                        </div>
+                    `;
+      } else {
+        // For AI messages, we'll use a div with the markdown-content class
+        // that will be updated with the parsed markdown
+        messageDiv.innerHTML = `
+                        <div class="bg-blue-100 rounded-lg p-3 max-w-[80%] text-gray-800">
+                            <p class="text-sm font-medium text-blue-600">AI</p>
+                            <div class="markdown-content">${content}</div>
+                        </div>
+                    `;
+      }
+
+      messagesContainer.appendChild(messageDiv);
+      scrollToBottom();
+
+      return messageDiv;
+    }
+
+    // Function to escape HTML special characters
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // Function to update an existing message with markdown content
+    function updateMessage(messageElement, content) {
+      const markdownContainer = messageElement.querySelector('.markdown-content');
+      if (markdownContainer) {
+        // Parse the content as markdown and set the HTML
+        markdownContainer.innerHTML = marked.parse(content);
+        // Apply syntax highlighting to code blocks
+        markdownContainer.querySelectorAll('pre code').forEach((block) => {
+          hljs.highlightElement(block);
+        });
+        scrollToBottom();
+      }
+    }
+
+    // Function to scroll to the bottom of the chat
+    function scrollToBottom() {
+      const chatContainer = document.getElementById('chat-container');
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+
+    // Function to filter out <Thinking> </Thinking> tags from content
+    function filterThinkTags(content) {
+      // Remove <Thinking> tags and their content
+      return content.replace(/<Thinking>[\s\S]*?<\/think>/g, '').trim();
+    }
+
+    // Function to handle form submission
+    chatForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+
+      const message = userInput.value.trim();
+      if (!message) return;
+
+      // Add user message to chat
+      addMessage(message, true);
+
+      // Create placeholder for AI response
+      currentMessageContent = '';
+      currentMessageElement = addMessage('...');
+
+      // Get selected model
+      const selectedModel = modelSelector.value;
+
+      // Create API URL with parameters
+      const apiUrl = `${baseApiUrl}/generate_stream?model=${encodeURIComponent(selectedModel)}&message=${encodeURIComponent(message)}`;
+
+      // Close any existing connection
+      if (currentEventSource) {
+        currentEventSource.close();
+      }
+
+      // Create new EventSource connection
+      currentEventSource = new EventSource(apiUrl);
+
+      // Handle incoming messages
+      currentEventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+
+          // Extract content from the response
+          if (data && data.result && data.result.output) {
+            const content = data.result.output.content || '';
+            if (content) {
+              // Filter out <Thinking> tags before adding to message
+              const filteredContent = filterThinkTags(content);
+              currentMessageContent += filteredContent;
+              // Update with markdown parsing
+              updateMessage(currentMessageElement, currentMessageContent);
+            }
+          }
+
+          // Check for finish reason
+          if (data && data.result && data.result.metadata && data.result.metadata.finishReason === 'STOP') {
+            currentEventSource.close();
+          }
+        } catch (error) {
+          console.error('Error parsing event data:', error);
+        }
+      };
+
+      // Handle errors
+      currentEventSource.onerror = (error) => {
+        console.error('EventSource error:', error);
+        updateMessage(currentMessageElement, currentMessageContent || 'Error: Could not get response');
+        currentEventSource.close();
+      };
+
+      // Clear input field
+      userInput.value = '';
+    });
+  });
+</script>
+</body>
+</html>
+
