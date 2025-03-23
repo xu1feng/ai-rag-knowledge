@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>知识库文件上传</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-gray-50 min-h-screen flex items-center justify-center p-4">
+<div class="w-full max-w-2xl bg-white rounded-xl shadow-lg overflow-hidden">
+    <!-- 标题栏 -->
+    <div class="bg-gradient-to-r from-purple-600 to-indigo-600 px-6 py-4">
+        <h1 class="text-white text-xl font-bold">知识库文件上传</h1>
+        <p class="text-purple-100 text-sm mt-1">上传文件到 AI 知识库，支持 md、txt、sql 格式</p>
+    </div>
+
+    <!-- 表单区域 -->
+    <div class="p-6">
+        <form id="uploadForm" class="space-y-6">
+            <!-- 知识库名称输入 -->
+            <div>
+                <label for="ragTag" class="block text-sm font-medium text-gray-700 mb-1">知识库名称</label>
+                <input type="text" id="ragTag" name="ragTag" required
+                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-colors"
+                       placeholder="请输入知识库名称">
+            </div>
+
+            <!-- 文件拖放区域 -->
+            <div id="dropArea" class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-purple-500 transition-colors">
+                <input type="file" id="fileInput" name="file" multiple accept=".md,.txt,.sql" class="hidden">
+                <div class="space-y-2">
+                    <i class="fas fa-cloud-upload-alt text-4xl text-gray-400"></i>
+                    <p class="text-gray-700">拖放文件到此处，或 <span class="text-purple-600 font-medium">点击选择文件</span></p>
+                    <p class="text-xs text-gray-500">支持 md、txt、sql 格式，可多选</p>
+                </div>
+            </div>
+
+            <!-- 已选文件列表 -->
+            <div id="fileList" class="space-y-2 hidden">
+                <h3 class="text-sm font-medium text-gray-700">已选文件</h3>
+                <ul id="selectedFiles" class="max-h-40 overflow-y-auto border border-gray-200 rounded-lg divide-y"></ul>
+            </div>
+
+            <!-- 上传进度 -->
+            <div id="uploadProgress" class="hidden">
+                <div class="flex justify-between text-sm text-gray-700 mb-1">
+                    <span>上传进度</span>
+                    <span id="progressPercent">0%</span>
+                </div>
+                <div class="w-full bg-gray-200 rounded-full h-2">
+                    <div id="progressBar" class="bg-purple-600 h-2 rounded-full" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <!-- 提交按钮 -->
+            <div class="flex justify-end">
+                <button type="submit" id="submitBtn" class="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 transition-colors">
+                    上传文件
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- 状态提示 -->
+    <div id="statusMessage" class="hidden px-6 py-3 border-t"></div>
+</div>
+
+<script>
+    // DOM 元素
+    const uploadForm = document.getElementById('uploadForm');
+    const ragTagInput = document.getElementById('ragTag');
+    const dropArea = document.getElementById('dropArea');
+    const fileInput = document.getElementById('fileInput');
+    const fileList = document.getElementById('fileList');
+    const selectedFiles = document.getElementById('selectedFiles');
+    const uploadProgress = document.getElementById('uploadProgress');
+    const progressBar = document.getElementById('progressBar');
+    const progressPercent = document.getElementById('progressPercent');
+    const submitBtn = document.getElementById('submitBtn');
+    const statusMessage = document.getElementById('statusMessage');
+
+    // 初始化
+    document.addEventListener('DOMContentLoaded', () => {
+        // 点击拖放区域触发文件选择
+        dropArea.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        // 文件选择变化事件
+        fileInput.addEventListener('change', handleFileSelect);
+
+        // 拖放事件
+        dropArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropArea.classList.add('border-purple-500', 'bg-purple-50');
+        });
+
+        dropArea.addEventListener('dragleave', () => {
+            dropArea.classList.remove('border-purple-500', 'bg-purple-50');
+        });
+
+        dropArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropArea.classList.remove('border-purple-500', 'bg-purple-50');
+
+            if (e.dataTransfer.files.length > 0) {
+                fileInput.files = e.dataTransfer.files;
+                handleFileSelect();
+            }
+        });
+
+        // 表单提交事件
+        uploadForm.addEventListener('submit', handleFormSubmit);
+    });
+
+    // 处理文件选择
+    function handleFileSelect() {
+        const files = fileInput.files;
+
+        if (files.length > 0) {
+            // 显示文件列表
+            fileList.classList.remove('hidden');
+            selectedFiles.innerHTML = '';
+
+            // 检查文件类型
+            let allValid = true;
+            const validTypes = ['.md', '.txt', '.sql'];
+
+            Array.from(files).forEach(file => {
+                const fileExt = '.' + file.name.split('.').pop().toLowerCase();
+                const isValid = validTypes.includes(fileExt);
+
+                if (!isValid) {
+                    allValid = false;
+                }
+
+                // 创建文件项
+                const fileItem = document.createElement('li');
+                fileItem.className = 'px-3 py-2 flex items-center justify-between';
+                fileItem.innerHTML = `
+            <div class="flex items-center">
+              <i class="fas ${getFileIcon(fileExt)} mr-2 ${isValid ? 'text-gray-500' : 'text-red-500'}"></i>
+              <span class="text-sm truncate max-w-xs">${file.name}</span>
+            </div>
+            <span class="text-xs ${isValid ? 'text-gray-500' : 'text-red-500'}">${formatFileSize(file.size)}</span>
+          `;
+
+                selectedFiles.appendChild(fileItem);
+            });
+
+            // 如果有无效文件类型，显示错误
+            if (!allValid) {
+                showStatus('error', '请只上传 md、txt、sql 格式的文件');
+                submitBtn.disabled = true;
+            } else {
+                hideStatus();
+                submitBtn.disabled = false;
+            }
+        } else {
+            // 隐藏文件列表
+            fileList.classList.add('hidden');
+            selectedFiles.innerHTML = '';
+        }
+    }
+
+    // 处理表单提交
+    function handleFormSubmit(e) {
+        e.preventDefault();
+
+        const ragTag = ragTagInput.value.trim();
+        const files = fileInput.files;
+
+        // 验证表单
+        if (!ragTag) {
+            showStatus('error', '请输入知识库名称');
+            return;
+        }
+
+        if (files.length === 0) {
+            showStatus('error', '请选择至少一个文件');
+            return;
+        }
+
+        // 准备表单数据
+        const formData = new FormData();
+        formData.append('ragTag', ragTag);
+
+        Array.from(files).forEach(file => {
+            formData.append('file', file);
+        });
+
+        // 禁用提交按钮
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> 上传中...';
+
+        // 显示进度条
+        uploadProgress.classList.remove('hidden');
+        progressBar.style.width = '0%';
+        progressPercent.textContent = '0%';
+
+        // 发送请求
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', 'http://localhost:8090/api/v1/rag/file/upload', true);
+
+        // 进度事件
+        xhr.upload.addEventListener('progress', (e) => {
+            if (e.lengthComputable) {
+                const percent = Math.round((e.loaded / e.total) * 100);
+                progressBar.style.width = `${percent}%`;
+                progressPercent.textContent = `${percent}%`;
+            }
+        });
+
+        // 完成事件
+        xhr.addEventListener('load', () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+                try {
+                    const response = JSON.parse(xhr.responseText);
+
+                    if (response.code === '0000') {
+                        showStatus('success', '文件上传成功！');
+
+                        // 重置表单
+                        setTimeout(() => {
+                            uploadForm.reset();
+                            fileList.classList.add('hidden');
+                            selectedFiles.innerHTML = '';
+                            uploadProgress.classList.add('hidden');
+                            hideStatus();
+                        }, 2000);
+                    } else {
+                        showStatus('error', `上传失败: ${response.info || '未知错误'}`);
+                    }
+                } catch (error) {
+                    showStatus('error', '解析响应失败，请稍后重试');
+                }
+            } else {
+                showStatus('error', `上传失败: ${xhr.status} ${xhr.statusText}`);
+            }
+
+            // 恢复提交按钮
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '上传文件';
+        });
+
+        // 错误事件
+        xhr.addEventListener('error', () => {
+            showStatus('error', '网络错误，请检查连接后重试');
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '上传文件';
+        });
+
+        // 发送请求
+        xhr.send(formData);
+    }
+
+    // 显示状态消息
+    function showStatus(type, message) {
+        statusMessage.classList.remove('hidden', 'bg-green-50', 'text-green-800', 'bg-red-50', 'text-red-800');
+
+        if (type === 'success') {
+            statusMessage.classList.add('bg-green-50', 'text-green-800');
+            statusMessage.innerHTML = `<i class="fas fa-check-circle mr-2"></i> ${message}`;
+        } else if (type === 'error') {
+            statusMessage.classList.add('bg-red-50', 'text-red-800');
+            statusMessage.innerHTML = `<i class="fas fa-exclamation-circle mr-2"></i> ${message}`;
+        }
+    }
+
+    // 隐藏状态消息
+    function hideStatus() {
+        statusMessage.classList.add('hidden');
+    }
+
+    // 获取文件图标
+    function getFileIcon(fileExt) {
+        switch (fileExt) {
+            case '.md':
+                return 'fa-file-alt';
+            case '.txt':
+                return 'fa-file-alt';
+            case '.sql':
+                return 'fa-database';
+            default:
+                return 'fa-file';
+        }
+    }
+
+    // 格式化文件大小
+    function formatFileSize(bytes) {
+        if (bytes === 0) return '0 Bytes';
+
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+</script>
+</body>
+</html>
